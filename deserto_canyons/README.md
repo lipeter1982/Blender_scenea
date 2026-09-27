@@ -60,3 +60,9 @@ frame numa GPU recente. Para pré-visualizar: *Output → Resolution* a 50 % e 3
 ou `USAR_VOLUME = False` (o volume é o que mais pesa).
 
 Orientação: +Y = Norte, +X = Este.
+
+## Pré-visualização
+
+Frames 1, 250, 400, 440, 480, 560, 660 e 960 (50 %, 24 amostras):
+
+![Transição dia - crepúsculo - noite](preview/transicao_dia_noite.png)
