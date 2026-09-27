@@ -13,6 +13,7 @@ plano e retocar no render.
 | # | Cenário | Jogo | Estado |
 |---|---|---|---|
 | 01 | [Cave de Rustin Parr](cenarios/01_blair_witch_cave_parr/) | Blair Witch Vol. 1: Rustin Parr (2000) | v1 |
+| 02 | [Igreja gótica soterrada](cenarios/02_messiah_igreja_soterrada/) | Messiah (2000) | v1 |
 
 ## Estrutura
 
