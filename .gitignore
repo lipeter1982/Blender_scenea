@@ -1,4 +1,8 @@
+# cópias de segurança do Blender
 *.blend1
-deserto_canyons/render/
+*.blend2
 __pycache__/
-deserto_canyons/texturas/
+
+# renders e cache de texturas descarregadas (cenário 06)
+cenarios/*/render/
+cenarios/*/texturas/
