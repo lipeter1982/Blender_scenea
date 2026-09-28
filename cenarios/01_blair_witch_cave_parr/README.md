@@ -14,7 +14,7 @@ pequenas. **O canto fica limpo**: é ali que o personagem se vira para a parede.
 
 | Ficheiro | O que é |
 |---|---|
-| `cave_parr.blend` | Cenário completo, pronto a abrir (Blender **4.5 LTS** ou mais recente) |
+| `cave_parr.blend` | Cenário completo, pronto a abrir (Blender **5.0** ou mais recente, testado no 5.0.1; o `build_scene.py` corre no 4.5 e no 5.x) |
 | `build_scene.py` | Script que gera o `.blend` de raiz; permite mudar parâmetros e regenerar |
 | `previews/` | Renders de pré-visualização (Cycles, 40 amostras, 1280 px) |
 

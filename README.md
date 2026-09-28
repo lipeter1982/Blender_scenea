@@ -42,7 +42,7 @@ plano e retocar no render.
 cenarios/
   NN_nome/
     build_scene.py   gera o .blend de raiz (reprodutível)
-    *.blend          cenário pronto a abrir (Blender 4.5+)
+    *.blend          cenário pronto a abrir (Blender 5.0+; scripts compatíveis com 4.5 e 5.x)
     previews/        renders de pré-visualização
     README.md        planos, variantes, como pôr o personagem
 ```

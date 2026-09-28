@@ -1457,67 +1457,125 @@ def setup_render():
     scn.view_settings.exposure = 1.1
 
 
-def setup_compositor():
-    """Look noir: quase monocromático, pretos profundos, halo nas velas, grão pesado."""
+def film_look(glare=(0.8, 0.35), lens=(0.01, 0.006), sat=0.8, lift=(1.0, 1.0, 1.0), gamma=(1.0, 1.0, 1.0),
+              gain=(1.0, 1.0, 1.0), mask_size=(0.95, 0.85), blur=300, vignette_min=0.5, grain=0.1):
+    """Look de película no Compositor (halo, lente, cor, vinheta, grão). Funciona no Blender 4.x e 5.x."""
     scn = bpy.context.scene
-    scn.use_nodes = True
-    nt = scn.node_tree
-    nt.nodes.clear()
+    v5 = not hasattr(scn, "node_tree")
+    if v5:   # Blender 5: o compositor é um grupo de nós atribuído à cena
+        nt = bpy.data.node_groups.new("Look_Pelicula", "CompositorNodeTree")
+        nt.interface.new_socket(name="Image", in_out="OUTPUT", socket_type="NodeSocketColor")
+        scn.compositing_node_group = nt
+    else:
+        scn.use_nodes = True
+        nt = scn.node_tree
+        nt.nodes.clear()
     N, L = nt.nodes.new, nt.links.new
+
+    def menu(node, name, value, attr, attr_value):
+        if hasattr(node, attr):
+            setattr(node, attr, attr_value)
+            return
+        for s in node.inputs:
+            if s.name == name and s.type == "MENU":
+                s.default_value = value
+
+    def mix(fac, a, b, blend):
+        if v5:
+            n = N("ShaderNodeMix")
+            n.data_type = "RGBA"
+            n.blend_type = blend
+            sock(n, "Factor_Float").default_value = fac
+            L(a, sock(n, "A_Color"))
+            L(b, sock(n, "B_Color"))
+            return sock(n, "Result_Color", out=True)
+        n = N("CompositorNodeMixRGB")
+        n.blend_type = blend
+        n.inputs["Fac"].default_value = fac
+        L(a, n.inputs[1])
+        L(b, n.inputs[2])
+        return n.outputs["Image"]
+
     rl = N("CompositorNodeRLayers")
-    glare = N("CompositorNodeGlare")
-    glare.glare_type = "FOG_GLOW"
-    try_set(glare, "Threshold", 0.7)
-    try_set(glare, "Strength", 0.45)
-    L(rl.outputs["Image"], glare.inputs["Image"])
-    lens = N("CompositorNodeLensdist")
-    try_set(lens, "Distortion", 0.015)
-    try_set(lens, "Dispersion", 0.008)
-    L(glare.outputs["Image"], lens.inputs["Image"])
+    img = rl.outputs["Image"]
+    if glare:
+        g = N("CompositorNodeGlare")
+        menu(g, "Type", "Fog Glow", "glare_type", "FOG_GLOW")
+        try_set(g, "Threshold", glare[0])
+        try_set(g, "Strength", glare[1])
+        L(img, g.inputs["Image"])
+        img = g.outputs["Image"]
+    if lens:
+        ld = N("CompositorNodeLensdist")
+        try_set(ld, "Distortion", lens[0])
+        try_set(ld, "Dispersion", lens[1])
+        L(img, ld.inputs["Image"])
+        img = ld.outputs["Image"]
     hs = N("CompositorNodeHueSat")
-    try_set(hs, "Saturation", 0.32)
-    L(lens.outputs["Image"], hs.inputs["Image"])
+    try_set(hs, "Saturation", sat)
+    L(img, hs.inputs["Image"])
     cb = N("CompositorNodeColorBalance")
-    cb.correction_method = "LIFT_GAMMA_GAIN"
-    try_set(cb, "Lift", (0.97, 0.99, 1.03))
-    try_set(cb, "Gamma", (1.0, 1.0, 1.0))
-    try_set(cb, "Gain", (1.05, 1.0, 0.95))
-    L(hs.outputs["Image"], cb.inputs["Image"])
-    mask = N("CompositorNodeEllipseMask")
-    try_set(mask, "Size", (0.9, 0.78))
-    blur = N("CompositorNodeBlur")
-    blur.filter_type = "FAST_GAUSS"
-    try_set(blur, "Size", (320, 320))
-    L(mask.outputs["Mask"], blur.inputs["Image"])
-    lift = N("CompositorNodeMapRange")
-    lift.inputs["From Min"].default_value = 0.0
-    lift.inputs["From Max"].default_value = 1.0
-    lift.inputs["To Min"].default_value = 0.3
-    lift.inputs["To Max"].default_value = 1.0
-    L(blur.outputs["Image"], lift.inputs["Value"])
-    vig = N("CompositorNodeMixRGB")
-    vig.blend_type = "MULTIPLY"
-    vig.inputs["Fac"].default_value = 1.0
-    L(cb.outputs["Image"], vig.inputs[1])
-    L(lift.outputs["Value"], vig.inputs[2])
-    tex = bpy.data.textures.new("T_Grao_Noir", "NOISE")
-    tn = N("CompositorNodeTexture")
-    tn.texture = tex
-    gblur = N("CompositorNodeBlur")
-    gblur.filter_type = "GAUSS"
-    try_set(gblur, "Size", (1, 1))
-    L(tn.outputs["Value"], gblur.inputs["Image"])
-    grain = N("CompositorNodeMixRGB")
-    grain.blend_type = "OVERLAY"
-    grain.inputs["Fac"].default_value = 0.2
-    L(vig.outputs["Image"], grain.inputs[1])
-    L(gblur.outputs["Image"], grain.inputs[2])
-    comp = N("CompositorNodeComposite")
-    L(grain.outputs["Image"], comp.inputs["Image"])
-    view = N("CompositorNodeViewer")
-    L(grain.outputs["Image"], view.inputs["Image"])
+    menu(cb, "Type", "Lift/Gamma/Gain", "correction_method", "LIFT_GAMMA_GAIN")
+    try_set(cb, "Lift", lift)
+    try_set(cb, "Gamma", gamma)
+    try_set(cb, "Gain", gain)
+    cb_out = cb.outputs["Image"]
+    if v5:   # no 5.x o Lift/Gamma/Gain trabalha em linear; estes Gamma reproduzem o grading do 4.x
+        g0, g1 = N("ShaderNodeGamma"), N("ShaderNodeGamma")
+        g0.inputs["Gamma"].default_value = 1 / 2.2
+        g1.inputs["Gamma"].default_value = 2.2
+        L(hs.outputs["Image"], g0.inputs["Color"])
+        L(g0.outputs["Color"], cb.inputs["Image"])
+        L(cb.outputs["Image"], g1.inputs["Color"])
+        cb_out = g1.outputs["Color"]
+    else:
+        L(hs.outputs["Image"], cb.inputs["Image"])
+    # vinheta
+    mk = N("CompositorNodeEllipseMask")
+    if not try_set(mk, "Size", mask_size):
+        mk.width, mk.height = mask_size
+    bl = N("CompositorNodeBlur")
+    menu(bl, "Type", "Fast Gaussian", "filter_type", "FAST_GAUSS")
+    if not try_set(bl, "Size", (blur, blur)):
+        bl.size_x = bl.size_y = blur
+    L(mk.outputs["Mask"], bl.inputs["Image"])
+    mr = N("ShaderNodeMapRange" if v5 else "CompositorNodeMapRange")
+    mr.inputs["From Min"].default_value = 0.0
+    mr.inputs["From Max"].default_value = 1.0
+    mr.inputs["To Min"].default_value = vignette_min
+    mr.inputs["To Max"].default_value = 1.0
+    L(bl.outputs["Image"], mr.inputs["Value"])
+    img = mix(1.0, cb_out, mr.outputs[0], "MULTIPLY")
+    # grão
+    if v5:
+        co = N("CompositorNodeImageCoordinates")
+        L(rl.outputs["Image"], co.inputs["Image"])
+        wn = N("ShaderNodeTexWhiteNoise")
+        L(co.outputs["Pixel"], wn.inputs["Vector"])
+        noise_out = wn.outputs["Value"]
+    else:
+        tn = N("CompositorNodeTexture")
+        tn.texture = bpy.data.textures.new("T_Grao", "NOISE")
+        noise_out = tn.outputs["Value"]
+    gb = N("CompositorNodeBlur")
+    menu(gb, "Type", "Gaussian", "filter_type", "GAUSS")
+    if not try_set(gb, "Size", (1, 1)):
+        gb.size_x = gb.size_y = 1
+    L(noise_out, gb.inputs["Image"])
+    img = mix(grain, img, gb.outputs["Image"], "OVERLAY")
+    if v5:
+        go = N("NodeGroupOutput")
+        L(img, go.inputs["Image"])
+    else:
+        L(img, N("CompositorNodeComposite").inputs["Image"])
+    L(img, N("CompositorNodeViewer").inputs["Image"])
     for i, n in enumerate(nt.nodes):
         n.location = (i * 220 - 1400, 0)
+
+
+def setup_compositor():
+    """Look noir: quase monocromático, pretos profundos, halo nas velas, grão pesado."""
+    film_look(glare=(0.7, 0.45), lens=(0.015, 0.008), sat=0.32, lift=(0.97, 0.99, 1.03), gain=(1.05, 1.0, 0.95), mask_size=(0.9, 0.78), blur=320, vignette_min=0.3, grain=0.2)
 
 
 README_TEXT = """IGREJA GÓTICA SOTERRADA — como usar

@@ -12,7 +12,7 @@ chapada e nevoeiro branco, que é igualmente inquietante).
 
 | Ficheiro | O que é |
 |---|---|
-| `floresta_enevoada.blend` | Cenário completo (Blender **4.5 LTS** ou mais recente) |
+| `floresta_enevoada.blend` | Cenário completo (Blender **5.0** ou mais recente, testado no 5.0.1; o `build_scene.py` corre no 4.5 e no 5.x) |
 | `build_scene.py` | Gera o `.blend` de raiz |
 | `previews/` | Renders de pré-visualização (Cycles, 40 amostras, 1280 px, frame 90) |
 
