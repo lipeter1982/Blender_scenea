@@ -17,6 +17,7 @@ plano e retocar no render.
 | 03 | [Gabinete do investigador](cenarios/03_gabinete_investigador/) | Base do canal (todos os vídeos) | v1 |
 | 04 | [Floresta enevoada e a clareira](cenarios/04_floresta_enevoada/) | Cenário genérico de horror (noite e dia) | v1 |
 | 05 | [Escola: corredor e sala de aula](cenarios/05_escola_corredor_sala/) | Sequência dos vultos (vazia → vultos → viraram-se) | v1 |
+| 06 | [Deserto: canyons, dunas e planícies](cenarios/06_deserto_canyons/) | Paisagem: dia → crepúsculo → noite, 40 s (Blender 5.x, Cycles) | v1 |
 
 ## Estrutura
 
