@@ -6,7 +6,7 @@
 Tem uma secretária de madeira com candeeiro de banqueiro, um monitor CRT bege e uma
 TV CRT, e um quadro de provas com fotografias e fio vermelho. Na estante, jogos em
 **sacos de prova etiquetados** ("PROVA Nº 001…"). As persianas cortam a luz néon da
-rua em faixas ciano e vermelhas, e a porta tem vidro fosco com letras douradas.
+rua em faixas ciano e vermelhas, e a porta tem vidro fosco com o nome do canal, **ARCANAUTA**.
 No relógio, parado às 3:33.
 
 ![Frente — apresentador](previews/cam1_frente_apresentador.jpg)
@@ -18,7 +18,7 @@ No relógio, parado às 3:33.
 | **Imagem/vídeo do jogo** no CRT da secretária **e** na TV | Substitua a imagem `ECRA_Jogo` (`Image > Replace…`). Aceita `.png`, `.jpg` ou vídeo `.mp4`. Num vídeo, no nó *Image Texture* do material `M_Ecra_CRT_Jogo`, ative *Auto Refresh* e indique o número de frames. O efeito de CRT (curvatura, scanlines e vinheta) é aplicado automaticamente. |
 | **6 fotografias do quadro de provas** | Substitua as imagens `FOTO_Prova_1` … `FOTO_Prova_6`. |
 | **Capa do "caso atual"** (a caixa em pé na secretária, virada para a câmara) | Substitua a imagem `CAPA_Caso_Atual`. |
-| **Letras da porta** | Edite `Porta_Letras_0` e `Porta_Letras_1` (`Tab` para editar o texto). Por omissão dizem "INVESTIGAÇÃO / SOFTWARE DE HORROR". Pode pôr o nome do canal. |
+| **Letras da porta** | Dizem **ARCANAUTA / INVESTIGAÇÃO DE SOFTWARE DE HORROR**, invertidas porque são vistas de dentro, como nos filmes noir. Para mudar, edite `Porta_Letras_0` e `Porta_Letras_1` (`Tab`). |
 
 ## Planos
 
@@ -32,6 +32,7 @@ No relógio, parado às 3:33.
 | `CAM_6_Insert_Provas` | A estante dos jogos em sacos de prova |
 | `CAM_7_Por_Cima_Ombro` | Por cima do ombro, para o CRT e o teclado |
 | `CAM_8_TV_Fundo_Analise` | A TV CRT com o jogo, como fundo das análises |
+| `CAM_9_Porta_Arcanauta` | A porta de vidro fosco com "ARCANAUTA" em contraluz, para abrir os vídeos |
 
 ## Personagem
 

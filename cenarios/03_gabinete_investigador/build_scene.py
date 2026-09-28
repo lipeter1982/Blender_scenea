@@ -45,7 +45,7 @@ TV_C = Vector((-1.35, 1.55, 0.0))                           # TV CRT no móvel a
 BOARD_C = Vector((-0.25, RY - 0.03, 1.72))                  # quadro de provas
 BOARD_W, BOARD_H = 1.7, 0.95
 SHELF_X0, SHELF_X1 = 1.0, 2.12
-DOOR_TEXT = ("INVESTIGAÇÃO", "SOFTWARE DE HORROR")          # letras no vidro da porta (editáveis)
+DOOR_TEXT = ("ARCANAUTA", "INVESTIGAÇÃO DE SOFTWARE DE HORROR")          # letras no vidro da porta (editáveis)
 
 def parse_args():
     argv = sys.argv
@@ -846,7 +846,7 @@ def build_door(col, mats, c_light):
     go = new_object("Porta_Vidro_Fosco", gl, col)
     go.visible_shadow = False
     # letras pintadas no vidro (vistas de dentro, por isso ao contrário)
-    for i, (txt, size, z) in enumerate(((DOOR_TEXT[0], 0.07, 1.62), (DOOR_TEXT[1], 0.045, 1.5))):
+    for i, (txt, size, z) in enumerate(((DOOR_TEXT[0], 0.1, 1.6), (DOOR_TEXT[1], 0.026, 1.5))):
         cu = bpy.data.curves.new(f"Porta_Letras_{i}", "FONT")
         cu.body = txt
         cu.size = size
@@ -857,7 +857,7 @@ def build_door(col, mats, c_light):
         t.rotation_euler = (math.radians(90), 0, math.radians(-90))
         t.scale = (-1, 1, 1)
     # luz do corredor por trás do vidro fosco
-    hall = light("LUZ_Corredor", "AREA", c_light, (x + 0.6, ym, 1.6), 40.0, (1.0, 0.75, 0.45), size=0.8)
+    hall = light("LUZ_Corredor", "AREA", c_light, (x + 0.6, ym, 1.6), 7.0, (1.0, 0.75, 0.45), size=0.8)
     hall.rotation_euler = (0, math.radians(90), 0)
 
 
@@ -1419,6 +1419,8 @@ def build_cameras(col, crt_center, tv_center):
     cam("CAM_5_Insert_Quadro", (BOARD_C.x + 0.15, 0.55, 1.6), BOARD_C + Vector((0, 0, -0.02)), 30, 5.6, 1.45)
     cam("CAM_6_Insert_Provas", (0.85, 0.45, 1.2), ((SHELF_X0 + SHELF_X1) / 2, RY - 0.25, 0.95), 35, 4.0, 1.5)
     cam("CAM_7_Por_Cima_Ombro", CHAIR_C + Vector((-0.35, 0.45, 1.42)), crt_center, 32, 2.8, 1.0)
+    door_c = Vector((RX, (DOOR_Y0 + DOOR_Y1) / 2, 1.55))
+    cam("CAM_9_Porta_Arcanauta", door_c + Vector((-1.7, 0.35, -0.05)), door_c, 35, 4.0, 1.75)
     cam("CAM_8_TV_Fundo_Analise", (0.35, -0.2, 1.2), tv_center + Vector((0.25, 0, 0.0)), 28, 4.0, 2.2)
     bpy.context.scene.camera = cams["CAM_1_Frente_Apresentador"]
     return cams
@@ -1680,6 +1682,7 @@ PREVIEWS = [
     ("cam6_insert_provas", "CAM_6_Insert_Provas", 0, 1),
     ("cam7_por_cima_ombro", "CAM_7_Por_Cima_Ombro", 0, 1),
     ("cam8_tv_fundo_analise", "CAM_8_TV_Fundo_Analise", 0, 1),
+    ("cam9_porta_arcanauta", "CAM_9_Porta_Arcanauta", 0, 1),
     ("cam1_var2_so_ecras", "CAM_1_Frente_Apresentador", 1, 1),
     ("cam3_var3_relampago", "CAM_3_Plano_Geral", 2, 61),
 ]
