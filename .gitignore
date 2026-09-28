@@ -2,3 +2,7 @@
 *.blend1
 *.blend2
 __pycache__/
+
+# renders e cache de texturas descarregadas (cenário 07, deserto)
+cenarios/*/render/
+cenarios/*/texturas/
