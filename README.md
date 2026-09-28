@@ -16,6 +16,7 @@ plano e retocar no render.
 | 02 | [Igreja gótica soterrada](cenarios/02_messiah_igreja_soterrada/) | Messiah (2000) | v1 |
 | 03 | [Gabinete do investigador](cenarios/03_gabinete_investigador/) | Base do canal (todos os vídeos) | v1 |
 | 04 | [Floresta enevoada e a clareira](cenarios/04_floresta_enevoada/) | Cenário genérico de horror (noite e dia) | v1 |
+| 05 | [Escola: corredor e sala de aula](cenarios/05_escola_corredor_sala/) | Sequência dos vultos (vazia → vultos → viraram-se) | v1 |
 
 ## Estrutura
 
