@@ -15,6 +15,7 @@ plano e retocar no render.
 | 01 | [Cave de Rustin Parr](cenarios/01_blair_witch_cave_parr/) | Blair Witch Vol. 1: Rustin Parr (2000) | v1 |
 | 02 | [Igreja gótica soterrada](cenarios/02_messiah_igreja_soterrada/) | Messiah (2000) | v1 |
 | 03 | [Gabinete do investigador](cenarios/03_gabinete_investigador/) | Base do canal (todos os vídeos) | v1 |
+| 04 | [Floresta enevoada e a clareira](cenarios/04_floresta_enevoada/) | Cenário genérico de horror (noite e dia) | v1 |
 
 ## Estrutura
 
