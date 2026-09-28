@@ -581,7 +581,7 @@ def frost(m, col, rough, amount=1.0, up=0.3, scale=3.0):
 # ---------------------------------------------------------------------------
 # Materiais
 # ---------------------------------------------------------------------------
-def mat_basalt(name, tone=1.0, cracks=False, crack_scale=0.25, ash=0.5, glow=3.0):
+def mat_basalt(name, tone=1.0, cracks=False, crack_scale=0.25, ash=0.5, glow=5.0):
     """Basalto negro com cinza clara; com cracks=True tem fendas de lava (Brasas) ou gelo azul (Gelo)."""
     m = Mat(name)
     obj = m.texcoord().outputs["Object"]
@@ -602,14 +602,21 @@ def mat_basalt(name, tone=1.0, cracks=False, crack_scale=0.25, ash=0.5, glow=3.0
         m.link(obj, warp.inputs[0])
         m.link(m.noise(obj, 0.8, 3.0, 0.5).outputs["Color"], warp.inputs[1])
         m.link(warp.outputs["Vector"], v.inputs["Vector"])
-        line = m.maprange(v.outputs["Distance"], 0.0, 0.022, 1.0, 0.0)
-        region = m.maprange(m.noise(obj, 0.07, 3.0, 0.5).outputs["Fac"], 0.54, 0.6)
-        crack = m.math("MULTIPLY", line, region)
+        dist = v.outputs["Distance"]
+        core = m.maprange(dist, 0.0, 0.016, 1.0, 0.0)            # fio de lava
+        halo = m.math("POWER", m.maprange(dist, 0.0, 0.09, 1.0, 0.0), 2.0)   # rocha em brasa à volta
+        region = m.maprange(m.noise(obj, 0.07, 3.0, 0.5).outputs["Fac"], 0.49, 0.57)
+        broken = m.maprange(m.noise(obj, 0.9, 2.0, 0.5).outputs["Fac"], 0.42, 0.52)   # parte as linhas: fendas soltas, não uma rede
+        mask = m.math("MULTIPLY", region, broken)
+        crack = m.math("MULTIPLY", core, mask)
+        glow_m = m.math("MULTIPLY", halo, mask)
         g_ = gelo(m)
         col = m.mix(crack, col, m.mix(g_, (0.02, 0.004, 0.0), (0.5, 0.65, 0.78)))
-        pulse = m.maprange(m.noise(obj, 1.5, 2.0, 0.5).outputs["Fac"], 0.3, 0.7, 0.4, 1.0)
-        m.set("Emission Color", m.mix(g_, (1.0, 0.5, 0.09), (0.35, 0.75, 1.0)))
-        m.set("Emission Strength", m.math("MULTIPLY", m.math("MULTIPLY", crack, pulse), m.mixf(g_, glow, 0.5)))
+        pulse = m.maprange(m.noise(obj, 1.5, 2.0, 0.5).outputs["Fac"], 0.3, 0.7, 0.5, 1.0)
+        fire_col = m.mix(crack, (0.55, 0.06, 0.005), (1.0, 0.42, 0.06))           # halo vermelho-escuro → núcleo laranja
+        m.set("Emission Color", m.mix(g_, fire_col, (0.35, 0.75, 1.0)))
+        e_fire = m.math("MULTIPLY", m.math("ADD", m.math("MULTIPLY", crack, glow), m.math("MULTIPLY", glow_m, 0.9)), pulse)
+        m.set("Emission Strength", m.mixf(g_, e_fire, m.math("MULTIPLY", crack, 0.5)))
         h = m.math("SUBTRACT", h, m.math("MULTIPLY", crack, 0.8))
     col, rough, _ = frost(m, col, rough)
     m.set("Base Color", col)
@@ -673,13 +680,18 @@ def mat_fire_ice(name="M_Chama_Congelada"):
     m = Mat(name)
     g_ = gelo(m)
     z = m.node("ShaderNodeSeparateXYZ")
-    m.link(m.texcoord().outputs["Generated"], z.inputs[0])
-    fire = m.ramp(z.outputs["Z"], [(0.0, (1.0, 0.68, 0.22)), (0.45, (1.0, 0.38, 0.05)), (1.0, (0.6, 0.1, 0.01))]).outputs["Color"]
+    m.link(m.texcoord().outputs["Object"], z.inputs[0])
+    hz = m.maprange(z.outputs["Z"], 0.35, 2.9)                  # 0 na taça, 1 na ponta mais alta
+    flick = m.noise(m.texcoord().outputs["Object"], 3.0, 3.0, 0.5).outputs["Fac"]
+    hz = m.math("ADD", hz, m.math("MULTIPLY", m.math("SUBTRACT", flick, 0.5), 0.3))
+    fire = m.ramp(hz, [(0.0, (1.0, 0.55, 0.12)), (0.3, (1.0, 0.3, 0.03)), (0.65, (0.75, 0.1, 0.01)),
+                       (1.0, (0.25, 0.02, 0.0))]).outputs["Color"]
+    heat = m.maprange(hz, 0.0, 1.0, 1.4, 0.35)
     m.set("Base Color", m.mix(g_, (0.0, 0.0, 0.0), (0.6, 0.8, 0.92)))
     m.set("Roughness", m.mixf(g_, 1.0, 0.05))
     m.set("Transmission Weight", m.mixf(g_, 0.0, 0.85))
     m.set("Emission Color", m.mix(g_, fire, (0.35, 0.75, 1.0)))
-    m.set("Emission Strength", m.mixf(g_, 0.8, 0.35))
+    m.set("Emission Strength", m.mixf(g_, heat, 0.35))
     m.set("Specular IOR Level", m.mixf(g_, 0.0, 0.5))
     return m.mat
 
@@ -1098,16 +1110,26 @@ def build_brazier(col, name, pos, iron, fire_mat):
     b.cylinder(top, top + Vector((0, 0, 0.45)), 0.18, 0.62, 12)
     b.cylinder(top + Vector((0, 0, 0.45)), top + Vector((0, 0, 0.52)), 0.66, 0.66, 12)
     b.to_object(name + "_Taca", col, [iron])
-    # chama: línguas torcidas com pontas enroladas
+    # chama: línguas que sobem do centro enroladas umas nas outras, com as pontas em espiral
     fc = new_curve(name + "_Chama", 1.0, 3)
-    for k in range(5):
-        a = 2 * math.pi * k / 5 + r_.uniform(-0.3, 0.3)
-        st = top + Vector((math.cos(a) * 0.3, math.sin(a) * 0.3, 0.4))
-        pts, rr = grow(st, Vector((math.cos(a) * 0.15, math.sin(a) * 0.15, 1)), r_.uniform(1.2, 2.2), 0.24, 0.04, 8, 0.12, r_)
-        cp = curl_pts(pts[-1], (pts[-1] - pts[-2]).normalized(), 0.18, 1.3, 14, r_)
-        spline(fc, pts + cp[1:], rr + [0.04 * (1 - i / 14) + 0.005 for i in range(1, 14)])
+    for k in range(9):
+        a0 = 2 * math.pi * k / 9 + r_.uniform(-0.25, 0.25)
+        hk = r_.uniform(0.9, 1.8) if k else 2.4                  # a língua central é a mais alta
+        r0 = 0.08 if k == 0 else r_.uniform(0.34, 0.55)
+        spin = r_.choice((-1, 1)) * r_.uniform(0.5, 0.9)
+        pts, rr = [], []
+        n = 14
+        for i in range(n + 1):
+            t = i / n
+            a = a0 + spin * t * 2 * math.pi
+            rad = r0 * (1 - 0.75 * t) * (1 + 0.35 * math.sin(math.pi * t)) + 0.04 * math.sin(t * 7 + k)
+            pts.append(Vector((math.cos(a) * rad, math.sin(a) * rad, 0.35 + hk * t)))
+            rr.append((0.24 if k == 0 else 0.17) * (1 - t) ** 0.8 + 0.025)
+        cp = curl_pts(pts[-1], (pts[-1] - pts[-2]).normalized(), 0.14 + 0.07 * hk, 1.4, 12, r_)
+        spline(fc, pts + cp[1:], rr + [0.025 * (1 - i / 12) + 0.004 for i in range(1, 12)])
     fc.materials.append(fire_mat)
-    new_object(name + "_Chama", fc, col)
+    fo = new_object(name + "_Chama", fc, col)
+    fo.location = top                                           # origem na taça: a cor segue a altura da chama
     return top + Vector((0, 0, 1.2))
 
 
