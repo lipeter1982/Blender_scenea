@@ -19,6 +19,7 @@ plano e retocar no render.
 | 05 | [Escola: corredor e sala de aula](cenarios/05_escola_corredor_sala/) | Sequência dos vultos (vazia → vultos → viraram-se) | v1 |
 | 06 | [Cemitério gótico e decadente](cenarios/06_cemiterio_gotico/) | Estilo Tim Burton (noite e dia) | v1 |
 | 07 | [Deserto: canyons, dunas e planícies](cenarios/07_deserto_canyons/) | Paisagem: dia → crepúsculo → noite, 40 s (Blender 5.x, Cycles) | v1 |
+| 08 | [Inferno: fogo e gelo](cenarios/08_inferno_fogo_gelo/) | Estilo Tim Burton, inspirado em Dante (Brasas e Gelo, um só interruptor) | v1 |
 
 ## Guia de estilo (para os próximos cenários)
 
