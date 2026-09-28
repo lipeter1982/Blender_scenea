@@ -11,7 +11,9 @@ Como usar
         blender -b -P deserto_canyons.py -- --save deserto.blend
         blender -b deserto.blend -a                      # render da animação
 
-O script apaga a cena atual e constrói tudo de raiz. Todos os parâmetros
+O script apaga a cena atual e constrói tudo de raiz. Na primeira execução
+descarrega texturas CC0 da Poly Haven (ver USAR_TEXTURAS); sem internet usa
+materiais procedurais. Todos os parâmetros
 importantes estão no bloco CONFIG logo abaixo.
 
 Orientação do mundo: +Y = Norte, +X = Este. O sol põe-se a Oeste-Noroeste,
@@ -25,9 +27,12 @@ derivado dela e gravado como keyframes, por isso pode ser afinado no
 Graph Editor depois de gerado.
 """
 
+import json
 import math
+import os
 import random
 import sys
+import urllib.request
 
 import bpy
 import bmesh
@@ -81,6 +86,29 @@ AMOSTRAS = 256
 USAR_VOLUME = True         # poeira volumétrica + raios crepusculares
 USAR_CALOR = True          # distorção do ar quente (só na parte diurna)
 USAR_COMPOSITOR = True     # bloom do sol
+
+# Realismo: deslocamento real nas rochas (subdivisão adaptativa do Cycles)
+USAR_DESLOCAMENTO = True
+DESLOC_PIXEL = 1.5         # tamanho alvo dos micropolígonos em píxeis (menor = mais detalhe/memória)
+DESLOC_AMPLITUDE = 1.0     # multiplicador global do deslocamento (m)
+
+# Realismo: texturas fotográficas PBR (Poly Haven, CC0)
+USAR_TEXTURAS = True
+TEXTURAS_ONLINE = True     # descarrega na 1.ª execução; depois usa a cache
+PASTA_TEXTURAS = ""        # vazio = <pasta do .blend>/texturas ou ~/deserto_texturas
+TEXTURAS_RES = "2k"
+# palavras-chave (por ordem de preferência) para escolher o asset de cada tipo;
+# ou coloque um id exato da Poly Haven, p.ex. "rocha": ["rock_face"]
+TEXTURAS_PREF = {
+    "rocha": ["sandstone", "red_rock", "cliff", "rock_face", "rock_wall", "rock"],
+    "areia": ["desert_sand", "coast_sand", "sand"],
+    "cascalho": ["gravel", "pebble", "laterite", "rocky_terrain", "dirt"],
+}
+TEXTURAS_EXCLUIR = {
+    "rocha": ["moss", "wet", "snow", "brick", "paving", "tiles", "wall_"],
+    "areia": ["stone", "rock", "gravel", "wet", "mud", "snow", "brick", "tiles"],
+    "cascalho": ["moss", "wet", "snow", "brick", "tiles", "paving", "leaves", "grass"],
+}
 
 # Scatter
 N_PEDRAS = 1400
@@ -341,8 +369,10 @@ def colecao(nome, pai=None):
 # =============================================================================
 
 
-def malha_grelha(nome, xs, ys, Z, cores=None, remover_nucleo=None):
-    """Cria malha de grelha (tensor xs x ys) com alturas Z[j, i]."""
+def malha_grelha(nome, xs, ys, Z, cores=None, remover_nucleo=None, faces=None, extra=None):
+    """Cria malha de grelha (tensor xs x ys) com alturas Z[j, i].
+    faces: máscara booleana (ny-1, nx-1) das quads a manter.
+    extra: {nome: array (ny, nx)} atributos float por vértice."""
     nx, ny = len(xs), len(ys)
     GX, GY = np.meshgrid(xs, ys)
     co = np.stack([GX, GY, Z], axis=-1).reshape(-1, 3).astype(np.float32)
@@ -357,9 +387,18 @@ def malha_grelha(nome, xs, ys, Z, cores=None, remover_nucleo=None):
         cy = 0.5 * (ys[J] + ys[J + 1])
         m = ~((np.abs(cx) < remover_nucleo) & (np.abs(cy) < remover_nucleo))
         I, J = I[m], J[m]
+    if faces is not None:
+        m = faces[J, I]
+        I, J = I[m], J[m]
     v0 = J * nx + I
-    quads = np.stack([v0, v0 + 1, v0 + nx + 1, v0 + nx], axis=-1).ravel().astype(np.int32)
+    quads = np.stack([v0, v0 + 1, v0 + nx + 1, v0 + nx], axis=-1).ravel()
     nf = len(v0)
+    # compacta: só os vértices usados
+    usados, quads = np.unique(quads, return_inverse=True)
+    quads = quads.astype(np.int32)
+    co = co[usados]
+    if cores is not None:
+        cores = cores.reshape(-1, cores.shape[-1])[usados]
 
     me = bpy.data.meshes.new(nome)
     me.vertices.add(len(co))
@@ -372,6 +411,9 @@ def malha_grelha(nome, xs, ys, Z, cores=None, remover_nucleo=None):
     if cores is not None:
         ca = me.color_attributes.new("mascaras", 'FLOAT_COLOR', 'POINT')
         ca.data.foreach_set("color", cores.astype(np.float32).ravel())
+    for nome_a, arr in (extra or {}).items():
+        at = me.attributes.new(nome_a, 'FLOAT', 'POINT')
+        at.data.foreach_set("value", arr.ravel()[usados].astype(np.float32))
     me.update(calc_edges=True)
     me.validate(verbose=False)
     return me
@@ -396,9 +438,54 @@ def criar_terreno(col):
     GX, GY = np.meshgrid(xs, xs)
     H, rocha, duna, playa = altura(GX, GY)
     cores = np.stack([rocha, duna, playa, np.ones_like(H)], axis=-1)
-    me = malha_grelha("Terreno_500m", xs, xs, H, cores)
+    passo = xs[1] - xs[0]
+    gy, gx = np.gradient(H, passo)
+    decl = np.sqrt(gx * gx + gy * gy)
+    # "rochosidade" por vértice: máscara de rocha ou encosta íngreme
+    w = np.clip(np.maximum(rocha * 1.2, smoothstep(0.5, 1.2, decl)), 0.0, 1.0) * (1.0 - duna)
+    objs = []
+    if USAR_DESLOCAMENTO:
+        # quads com rocha -> malha própria com subdivisão adaptativa + deslocamento
+        wq = np.maximum(np.maximum(w[:-1, :-1], w[1:, :-1]), np.maximum(w[:-1, 1:], w[1:, 1:]))
+        sel = wq > 0.04
+        # fronteira: vértices partilhados com quads não selecionadas -> deslocamento 0
+        nsel = ~sel
+        fronteira = np.zeros_like(H, dtype=bool)
+        for dj, di in ((0, 0), (1, 0), (0, 1), (1, 1)):
+            fronteira[dj:dj + nsel.shape[0], di:di + nsel.shape[1]] |= nsel
+        desloc = np.where(fronteira, 0.0, w)
+        # suaviza a transição para 0 junto à fronteira
+        for _ in range(3):
+            d2 = desloc.copy()
+            d2[1:-1, 1:-1] = np.minimum(desloc[1:-1, 1:-1],
+                                        0.5 * desloc[1:-1, 1:-1] + 0.125 * (desloc[:-2, 1:-1] + desloc[2:, 1:-1]
+                                                                            + desloc[1:-1, :-2] + desloc[1:-1, 2:]))
+            desloc = np.where(fronteira, 0.0, d2)
+        me_r = malha_grelha("Terreno_Rocha", xs, xs, H, cores, faces=sel, extra={"desloc": desloc})
+        ob_r = bpy.data.objects.new("Terreno_Rocha", me_r)
+        col.objects.link(ob_r)
+        md = ob_r.modifiers.new("Subdiv_Adaptativa", 'SUBSURF')
+        md.subdivision_type = 'SIMPLE'
+        md.levels = 0
+        md.render_levels = 1
+        if hasattr(md, "use_adaptive_subdivision"):          # Blender 5.x
+            md.use_adaptive_subdivision = True
+            md.adaptive_pixel_size = DESLOC_PIXEL
+        else:                                                 # Blender 4.x
+            try:
+                bpy.context.scene.cycles.feature_set = 'EXPERIMENTAL'
+                ob_r.cycles.use_adaptive_subdivision = True
+                bpy.context.scene.cycles.dicing_rate = DESLOC_PIXEL
+            except Exception:
+                pass
+        objs.append(ob_r)
+        print("[deserto] rocha com deslocamento: %d quads" % int(sel.sum()))
+        me = malha_grelha("Terreno_500m", xs, xs, H, cores, faces=nsel)
+    else:
+        me = malha_grelha("Terreno_500m", xs, xs, H, cores)
     ob = bpy.data.objects.new("Terreno_500m", me)
     col.objects.link(ob)
+    objs.insert(0, ob)
 
     print("[deserto] a gerar terreno distante ...")
     ax = eixo_horizonte(MEIO, 5.0, RAIO_HORIZONTE)
@@ -411,7 +498,7 @@ def criar_terreno(col):
     me2 = malha_grelha("Terreno_Horizonte", ax, ax, H2, cores2, remover_nucleo=MEIO - 5.0)
     ob2 = bpy.data.objects.new("Terreno_Horizonte", me2)
     col.objects.link(ob2)
-    return ob, ob2
+    return objs, ob2
 
 
 # =============================================================================
@@ -803,6 +890,173 @@ def criar_mundo(grupo):
 # =============================================================================
 
 
+# ---- Texturas fotográficas (Poly Haven, CC0) --------------------------------
+
+_MAPAS = {  # tipo de mapa -> prefixos aceites no nome do ficheiro / chave da API
+    "diff": ("diff", "albedo", "basecolor", "base_color", "color", "col"),
+    "rough": ("rough",),
+    "disp": ("disp", "height"),
+}
+_API = "https://api.polyhaven.com"
+_UA = {"User-Agent": "deserto_canyons-blender-script/1.0"}
+
+
+def pasta_texturas():
+    if PASTA_TEXTURAS:
+        return bpy.path.abspath(PASTA_TEXTURAS)
+    if bpy.data.filepath:
+        return os.path.join(os.path.dirname(bpy.data.filepath), "texturas")
+    return os.path.join(os.path.expanduser("~"), "deserto_texturas")
+
+
+def _tipo_mapa(nome):
+    n = nome.lower()
+    for tipo, pref in _MAPAS.items():
+        if any(n.startswith(p) or ("_" + p) in n for p in pref):
+            if tipo == "diff" and ("nor" in n or "rough" in n or "disp" in n):
+                continue
+            return tipo
+    return None
+
+
+def _procurar_local(pasta):
+    res = {}
+    if not os.path.isdir(pasta):
+        return res
+    for f in sorted(os.listdir(pasta)):
+        if f.lower().rsplit(".", 1)[-1] not in ("jpg", "jpeg", "png", "exr", "tif", "tiff"):
+            continue
+        t = _tipo_mapa(f)
+        if t and t not in res:
+            res[t] = os.path.join(pasta, f)
+    return res
+
+
+def _json(url):
+    req = urllib.request.Request(url, headers=_UA)
+    with urllib.request.urlopen(req, timeout=30) as r:
+        return json.loads(r.read().decode("utf-8"))
+
+
+def _escolher_asset(lista, tipo):
+    prefs = TEXTURAS_PREF.get(tipo, [])
+    excl = TEXTURAS_EXCLUIR.get(tipo, [])
+    for p in prefs:
+        if p in lista:
+            return p
+        cand = []
+        for aid, info in lista.items():
+            texto = " ".join([aid, str(info.get("name", ""))] + [str(t) for t in info.get("tags", [])]).lower()
+            if p in texto and not any(e in aid for e in excl):
+                # prefere correspondência no id e popularidade (downloads)
+                cand.append((p not in aid, -int(info.get("download_count", 0) or 0), aid))
+        if cand:
+            return sorted(cand)[0][2]
+    return None
+
+
+def _descarregar(tipo, pasta):
+    print("[deserto] a descarregar textura '%s' da Poly Haven ..." % tipo)
+    lista = _json(_API + "/assets?t=textures")
+    aid = _escolher_asset(lista, tipo)
+    if not aid:
+        raise RuntimeError("nenhum asset encontrado para " + tipo)
+    ficheiros = _json(_API + "/files/" + aid)
+    os.makedirs(pasta, exist_ok=True)
+    obtidos = {}
+    for chave, por_res in ficheiros.items():
+        t = _tipo_mapa(chave)
+        if t is None or t in obtidos or not isinstance(por_res, dict):
+            continue
+        res = por_res.get(TEXTURAS_RES) or por_res.get("2k") or por_res.get("1k")
+        if not isinstance(res, dict):
+            continue
+        for fmt in ("jpg", "png"):
+            if fmt in res and "url" in res[fmt]:
+                destino = os.path.join(pasta, "%s_%s.%s" % (t, aid, fmt))
+                req = urllib.request.Request(res[fmt]["url"], headers=_UA)
+                with urllib.request.urlopen(req, timeout=120) as r, open(destino, "wb") as f:
+                    f.write(r.read())
+                obtidos[t] = destino
+                break
+    with open(os.path.join(pasta, "ORIGEM.txt"), "w", encoding="utf-8") as f:
+        f.write("Poly Haven: https://polyhaven.com/a/%s  (licença CC0)\n" % aid)
+    print("[deserto]   %s -> %s (%s)" % (tipo, aid, ", ".join(sorted(obtidos))))
+    return obtidos
+
+
+def carregar_texturas():
+    """Devolve {tipo: {"diff": Image, "rough": Image, "disp": Image, "media": (r, g, b)}}.
+    Procura primeiro na pasta local (pode pôr lá as suas texturas); se faltar, descarrega."""
+    base = pasta_texturas()
+    out = {}
+    for tipo in TEXTURAS_PREF:
+        pasta = os.path.join(base, tipo)
+        mapas = _procurar_local(pasta)
+        if "diff" not in mapas and TEXTURAS_ONLINE:
+            try:
+                _descarregar(tipo, pasta)
+                mapas = _procurar_local(pasta)
+            except Exception as e:
+                print("[deserto] textura '%s' indisponível (%s) - fica o material procedural" % (tipo, e))
+        if "diff" not in mapas:
+            continue
+        d = {}
+        for t, caminho in mapas.items():
+            img = bpy.data.images.load(caminho, check_existing=True)
+            if t != "diff":
+                img.colorspace_settings.is_data = True
+            d[t] = img
+        # cor média do difuso (para usar a textura como detalhe sem mudar as cores da cena)
+        img = d["diff"]
+        px = np.empty(img.size[0] * img.size[1] * img.channels, dtype=np.float32)
+        img.pixels.foreach_get(px)
+        px = px.reshape(-1, img.channels)[::7, :3]
+        if not img.is_float:   # imagens de 8 bits: pixels em sRGB -> linear (como o shader as lê)
+            px = np.where(px <= 0.04045, px / 12.92, ((px + 0.055) / 1.055) ** 2.4)
+        d["media"] = tuple(float(max(v, 0.02)) for v in px.mean(axis=0))
+        out[tipo] = d
+        print("[deserto] textura '%s': %s" % (tipo, ", ".join(sorted(k for k in d if k != "media"))))
+    return out
+
+
+def no_textura(b, img, vec, escala, dados=False):
+    """Imagem com projeção em caixa (triplanar) - não precisa de UVs."""
+    nd = b.node("ShaderNodeTexImage")
+    nd.image = img
+    nd.projection = 'BOX'
+    nd.projection_blend = 0.3
+    nd.interpolation = 'Linear'
+    b.link(b.vmath('SCALE', vec, sc=1.0 / escala), nd.inputs["Vector"])
+    return nd
+
+
+def detalhe_textura(b, tex, vec, escala, anti_repeticao=True):
+    """Cor da textura normalizada pela média (~1.0), com mistura de 2 escalas para esconder a repetição."""
+    t1 = no_textura(b, tex["diff"], vec, escala)
+    cor = t1.outputs["Color"]
+    if anti_repeticao:
+        rot = b.node("ShaderNodeVectorRotate", rotation_type='Z_AXIS')
+        b.link(vec, rot.inputs["Vector"])
+        rot.inputs["Angle"].default_value = 0.9
+        t2 = no_textura(b, tex["diff"], rot.outputs[0], escala * 2.7)
+        mascara = b.noise(vec, 0.6 / escala, 2.0, 0.5)
+        cor = b.mix(b.maprange(mascara.outputs[0], 0.4, 0.6), cor, t2.outputs["Color"])
+    inv = tuple(1.0 / c for c in tex["media"])
+    return b.mix(1.0, cor, inv, blend='MULTIPLY', clamp=False), t1
+
+
+def altura_textura(b, tex, vec, escala):
+    """Mapa de deslocamento (0..1, centrado em 0) ou luminância como alternativa."""
+    if "disp" in tex:
+        nd = no_textura(b, tex["disp"], vec, escala)
+        return b.math('SUBTRACT', nd.outputs["Color"], 0.5)
+    nd = no_textura(b, tex["diff"], vec, escala)
+    bw = b.node("ShaderNodeRGBToBW")
+    b.link(nd.outputs["Color"], bw.inputs[0])
+    return b.math('SUBTRACT', bw.outputs[0], sum(tex["media"]) / 3.0)
+
+
 def mat_novo(nome):
     m = bpy.data.materials.new(nome)
     try:
@@ -813,7 +1067,8 @@ def mat_novo(nome):
     return m, NB(m.node_tree)
 
 
-def criar_mat_terreno(grupo_ceu):
+def criar_mat_terreno(grupo_ceu, tex=None):
+    tex = tex or {}
     m, b = mat_novo("Terreno_Deserto")
     tc = b.node("ShaderNodeTexCoord")
     geo = b.node("ShaderNodeNewGeometry")
@@ -829,6 +1084,9 @@ def criar_mat_terreno(grupo_ceu):
     # --- areia ---------------------------------------------------------------
     n_areia = b.noise(pos, 0.012, 4.0, 0.55)
     areia1 = b.mix(n_areia.outputs[0], (0.84, 0.45, 0.18), (0.72, 0.34, 0.12))
+    if "areia" in tex:   # grão e pormenor fotográfico, mantendo a cor da cena
+        det_a, _ = detalhe_textura(b, tex["areia"], pos, 2.2)
+        areia1 = b.mix(0.8, areia1, b.mix(1.0, areia1, det_a, blend='MULTIPLY'))
     n_plan = b.noise(pos, 0.03, 5.0, 0.6)
     plan_c = b.mix(n_plan.outputs[0], (0.72, 0.48, 0.30), (0.58, 0.38, 0.24))
     # cascalho escuro (reg / pavimento desértico)
@@ -838,6 +1096,9 @@ def criar_mat_terreno(grupo_ceu):
     casc = b.math('MULTIPLY', b.maprange(vor.outputs["Distance"], 0.25, 0.12),
                   b.maprange(b.sep(vor.outputs["Color"])[0], 0.55, 0.8))
     plan_c = b.mix(b.math('MULTIPLY', casc, 0.7), plan_c, (0.26, 0.17, 0.12))
+    if "cascalho" in tex:
+        det_c, _ = detalhe_textura(b, tex["cascalho"], pos, 1.8)
+        plan_c = b.mix(0.9, plan_c, b.mix(1.0, plan_c, det_c, blend='MULTIPLY'))
     solo = b.mix(m_duna, plan_c, areia1)
     # playa: argila clara com gretas
     vor_g = b.node("ShaderNodeTexVoronoi", feature='DISTANCE_TO_EDGE')
@@ -869,6 +1130,13 @@ def criar_mat_terreno(grupo_ceu):
     esc = b.noise(b.vmath('MULTIPLY', pos, (0.35, 0.35, 0.025)), 2.0, 4.0, 0.6)
     verniz = b.math('MULTIPLY', b.maprange(esc.outputs[0], 0.5, 0.7), declive)
     rocha_c = b.mix(b.math('MULTIPLY', verniz, 0.75), rocha_c, (0.12, 0.07, 0.05))
+    rough_rocha = 0.82
+    if "rocha" in tex:   # textura fotográfica de rocha sobre as cores dos estratos
+        det_r, _ = detalhe_textura(b, tex["rocha"], pos, 5.0)
+        rocha_c = b.mix(0.9, rocha_c, b.mix(1.0, rocha_c, det_r, blend='MULTIPLY'))
+        if "rough" in tex["rocha"]:
+            nr = no_textura(b, tex["rocha"]["rough"], pos, 5.0)
+            rough_rocha = b.maprange(b.sep(nr.outputs["Color"])[0], 0.0, 1.0, 0.62, 0.98)
 
     # fator rocha: máscara + declive
     f_rocha = b.math('MAXIMUM', b.math('MULTIPLY', m_rocha, b.maprange(nz, 0.97, 0.85)),
@@ -896,6 +1164,12 @@ def criar_mat_terreno(grupo_ceu):
     h_tot = b.math('ADD', b.math('ADD', b.math('MULTIPLY', h_ond, 0.6), b.math('MULTIPLY', h_rocha, 3.0)),
                    b.math('MULTIPLY', grao.outputs[0], 0.08))
     h_tot = b.math('ADD', h_tot, b.math('MULTIPLY', greta, b.math('MULTIPLY', m_playa, 0.4)))
+    if "rocha" in tex:
+        h_tot = b.math('ADD', h_tot, b.math('MULTIPLY', altura_textura(b, tex["rocha"], pos, 5.0),
+                                            b.math('MULTIPLY', f_rocha, 2.5)))
+    if "areia" in tex:
+        h_tot = b.math('ADD', h_tot, b.math('MULTIPLY', altura_textura(b, tex["areia"], pos, 2.2),
+                                            b.math('SUBTRACT', 1.0, f_rocha)))
     bump = b.node("ShaderNodeBump")
     bump.inputs["Strength"].default_value = 0.35
     bump.inputs["Distance"].default_value = 0.08
@@ -903,7 +1177,7 @@ def criar_mat_terreno(grupo_ceu):
 
     bsdf = b.node("ShaderNodeBsdfPrincipled")
     b.link(cor, bsdf.inputs["Base Color"])
-    b.link(b.mix(f_rocha, 0.95, 0.82, tipo='FLOAT'), bsdf.inputs["Roughness"])
+    b.link(b.mix(f_rocha, 0.95, rough_rocha, tipo='FLOAT'), bsdf.inputs["Roughness"])
     b.link(bump.outputs[0], bsdf.inputs["Normal"])
     bsdf.inputs["Specular IOR Level"].default_value = 0.12
     # brilho da areia contra a luz
@@ -932,11 +1206,60 @@ def criar_mat_terreno(grupo_ceu):
     b.link(em.outputs[0], ms.inputs[2])
     out = b.node("ShaderNodeOutputMaterial")
     b.link(ms.outputs[0], out.inputs[0])
+
+    # --- deslocamento real (só na malha Terreno_Rocha, atributo "desloc") ---
+    if USAR_DESLOCAMENTO:
+        a_desl = b.node("ShaderNodeAttribute", attribute_name="desloc").outputs["Fac"]
+        # estratos salientes: cada camada de arenito sobressai na base e recua no topo
+        n_l = b.noise(pos, 0.06, 2.0, 0.5)
+        zl = b.math('ADD', pz, b.math('MULTIPLY', n_l.outputs[0], 1.4))
+        camada = b.math('FRACT', b.math('DIVIDE', zl, 1.7))
+        h_cam = b.math('ADD', b.maprange(camada, 0.0, 0.22, 0.5, 0.0), b.maprange(camada, 0.82, 1.0, 0.0, 0.12))
+        n_cam = b.noise(pos, 0.35, 3.0, 0.5)
+        h_cam = b.math('MULTIPLY', h_cam, b.maprange(n_cam.outputs[0], 0.35, 0.65, 0.2, 1.2))
+        # juntas verticais: blocos (células altas) separados por fendas
+        # (células esticadas na vertical e distorcidas -> juntas irregulares, não polígonos)
+        dist_j = b.noise(pos, 0.12, 4.0, 0.6)
+        vj = b.vmath('ADD', b.vmath('MULTIPLY', pos, (1.0, 1.0, 0.22)),
+                     b.vmath('SCALE', b.vmath('SUBTRACT', dist_j.outputs["Color"], (0.5, 0.5, 0.5)), sc=4.0))
+        vb = b.node("ShaderNodeTexVoronoi", feature='DISTANCE_TO_EDGE')
+        b.link(vj, vb.inputs["Vector"])
+        vb.inputs["Scale"].default_value = 0.22
+        prof = b.noise(pos, 0.08, 2.0, 0.5)
+        fenda = b.maprange(vb.outputs["Distance"], 0.0, 0.035, -0.55, 0.0)
+        fenda = b.math('MULTIPLY', fenda, b.maprange(prof.outputs[0], 0.35, 0.6, 0.1, 1.0))
+        vb2 = b.node("ShaderNodeTexVoronoi", feature='F1')
+        b.link(vj, vb2.inputs["Vector"])
+        vb2.inputs["Scale"].default_value = 0.22
+        bloco = b.math('MULTIPLY', b.math('SUBTRACT', b.sep(vb2.outputs["Color"])[0], 0.5), 0.45)
+        # erosão irregular
+        er = b.noise(pos, 0.22, 7.0, 0.62)
+        eros = b.math('MULTIPLY', b.math('SUBTRACT', er.outputs[0], 0.5), 1.4)
+        h_d = b.math('ADD', b.math('ADD', h_cam, fenda), b.math('ADD', bloco, eros))
+        if "rocha" in tex:
+            h_d = b.math('ADD', h_d, b.math('MULTIPLY', altura_textura(b, tex["rocha"], pos, 5.0), 0.6))
+        # menos relevo nos topos planos das mesas
+        topo = b.maprange(nz, 0.8, 0.97, 1.0, 0.35)
+        # só onde a superfície é rocha (não nos taludes de areia)
+        so_rocha = b.maprange(f_rocha, 0.25, 0.75)
+        h_d = b.math('MULTIPLY', b.math('MULTIPLY', h_d, b.math('MULTIPLY', topo, so_rocha)),
+                     b.math('MULTIPLY', a_desl, DESLOC_AMPLITUDE))
+        dsp = b.node("ShaderNodeDisplacement", space='OBJECT')
+        b.link(h_d, dsp.inputs["Height"])
+        dsp.inputs["Midlevel"].default_value = 0.0
+        dsp.inputs["Scale"].default_value = 1.0
+        b.link(dsp.outputs[0], out.inputs["Displacement"])
+        for alvo in (m, getattr(m, "cycles", None)):
+            try:
+                alvo.displacement_method = 'BOTH'
+                break
+            except Exception:
+                continue
     arrumar(m.node_tree)
     return m
 
 
-def criar_mat_rocha():
+def criar_mat_rocha(tex=None):
     m, b = mat_novo("Pedra_Arenito")
     tc = b.node("ShaderNodeTexCoord")
     geo = b.node("ShaderNodeNewGeometry")
@@ -945,13 +1268,19 @@ def criar_mat_rocha():
     n1 = b.noise(obj, 1.2, 6.0, 0.6)
     base = b.mix(info.outputs["Random"], (0.55, 0.24, 0.11), (0.42, 0.26, 0.17))
     c = b.mix(b.maprange(n1.outputs[0], 0.35, 0.7), base, (0.30, 0.15, 0.09))
+    if tex and "rocha" in tex:
+        det, _ = detalhe_textura(b, tex["rocha"], obj, 1.5, anti_repeticao=False)
+        c = b.mix(0.9, c, b.mix(1.0, c, det, blend='MULTIPLY'))
     # pó/areia depositada no topo
     nz = b.sep(geo.outputs["Normal"])[2]
     c = b.mix(b.maprange(nz, 0.55, 0.9, 0.0, 0.55), c, (0.78, 0.50, 0.27))
     n2 = b.noise(obj, 6.0, 8.0, 0.7)
     bump = b.node("ShaderNodeBump")
     bump.inputs["Strength"].default_value = 0.5
-    b.link(n2.outputs[0], bump.inputs["Height"])
+    h = n2.outputs[0]
+    if tex and "rocha" in tex:
+        h = b.math('ADD', h, b.math('MULTIPLY', altura_textura(b, tex["rocha"], obj, 1.5), 2.0))
+    b.link(h, bump.inputs["Height"])
     bsdf = b.node("ShaderNodeBsdfPrincipled")
     b.link(c, bsdf.inputs["Base Color"])
     bsdf.inputs["Roughness"].default_value = 0.85
@@ -1248,11 +1577,11 @@ def amostrar_pontos(rng, n, aceitar, margem=4.0, tentativas=40):
     return out
 
 
-def criar_scatter(col_cena, col_assets):
+def criar_scatter(col_cena, col_assets, texturas=None):
     print("[deserto] a criar pedras, arbustos e cactos ...")
     rng = random.Random(SEMENTE)
     nrng = np.random.default_rng(SEMENTE)
-    m_rocha = criar_mat_rocha()
+    m_rocha = criar_mat_rocha(texturas or {})
     m_arb = criar_mat_madeira_seca()
     m_erva = criar_mat_erva()
     m_cacto = criar_mat_cacto()
@@ -1709,6 +2038,12 @@ def configurar_render():
     cy.caustics_reflective = False
     cy.caustics_refractive = False
     try:
+        cy.dicing_rate = DESLOC_PIXEL
+        cy.offscreen_dicing_scale = 6.0
+        cy.max_subdivisions = 10
+    except Exception:
+        pass
+    try:
         cy.volume_step_rate = 4.0
         cy.volume_max_steps = 256
     except Exception:
@@ -1803,12 +2138,13 @@ def main():
     grupo_ceu = criar_grupo_ceu()
     criar_mundo(grupo_ceu)
 
-    ter, hor = criar_terreno(c_terreno)
-    mt = criar_mat_terreno(grupo_ceu)
-    ter.data.materials.append(mt)
-    hor.data.materials.append(mt)
+    texturas = carregar_texturas() if USAR_TEXTURAS else {}
+    terrenos, hor = criar_terreno(c_terreno)
+    mt = criar_mat_terreno(grupo_ceu, texturas)
+    for ob in terrenos + [hor]:
+        ob.data.materials.append(mt)
 
-    criar_scatter(c_veg, c_assets)
+    criar_scatter(c_veg, c_assets, texturas)
     # esconde os assets originais (continuam a ser instanciados)
     vl = bpy.context.view_layer.layer_collection
     for lc in vl.children:

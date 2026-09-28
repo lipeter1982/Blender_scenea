@@ -36,6 +36,22 @@ blender -b deserto.blend -a                                 # renderiza a anima�
 | Céu | Grupo de nós `Ceu_Deserto`: Sky Texture (Multiple Scattering) + brilho crepuscular + auréola do sol + cinturão de Vénus / sombra da Terra + céu noturno + estrelas cintilantes + Via Láctea + lua com fase correta |
 | Atmosfera | Volume de poeira junto ao solo (raios crepusculares), perspetiva aérea no material do terreno com a cor real do horizonte, e distorção do ar quente (só de dia) |
 | Pós-produção | Bloom no compositor, AgX Punchy |
+| Rochas com deslocamento real | As zonas rochosas estão numa malha própria (`Terreno_Rocha`) com subdivisão adaptativa do Cycles: estratos salientes, juntas verticais irregulares, blocos e erosão. O deslocamento vai a zero na fronteira com o resto do terreno (sem fissuras) |
+| Texturas fotográficas | Rocha, areia e cascalho CC0 da [Poly Haven](https://polyhaven.com), projeção em caixa (sem UVs), normalizadas pela cor média para acrescentar grão e pormenor sem mudar as cores da cena |
+
+## Texturas (Poly Haven)
+
+Na primeira execução o script usa a API da Poly Haven para escolher e descarregar
+(2k) uma textura de **rocha**, **areia** e **cascalho**, que ficam em cache em:
+
+- `<pasta do .blend>/texturas/`, se o ficheiro já estiver guardado, ou
+- `~/deserto_texturas/` (ou o caminho em `PASTA_TEXTURAS`).
+
+Cada pasta (`rocha/`, `areia/`, `cascalho/`) inclui um `ORIGEM.txt` com o asset
+usado. **Podes usar as tuas próprias texturas**: basta pôr na pasta ficheiros cujo nome
+comece por `diff`/`albedo`/`color`, `rough` e `disp`/`height`. Para escolher outro asset,
+apaga a pasta e define o id em `TEXTURAS_PREF` (p.ex. `"rocha": ["rock_face"]`).
+Sem internet, o script avisa e mantém os materiais procedurais.
 
 ## Afinar
 
@@ -55,8 +71,9 @@ Graph Editor: nós do grupo `Ceu_Deserto`, luz `Sol`, `Luar` e *Color Management
 
 ## Tempos de render
 
-Com volume, a 1920×1080 e 256 amostras (denoise OIDN), conte com cerca de 1 a 3 min por
-frame numa GPU recente. Para pré-visualizar: *Output → Resolution* a 50 % e 32 amostras,
+Com volume e deslocamento, a 1920×1080 e 256 amostras (denoise OIDN), conte com cerca de
+2 a 4 min por frame numa GPU recente (o deslocamento acrescenta ~50 % ao tempo e alguns GB
+de memória). Se faltar memória, sobe `DESLOC_PIXEL` (p.ex. 3) ou `USAR_DESLOCAMENTO = False`. Para pré-visualizar: *Output → Resolution* a 50 % e 32 amostras,
 ou `USAR_VOLUME = False` (o volume é o que mais pesa).
 
 Orientação: +Y = Norte, +X = Este.
@@ -66,3 +83,7 @@ Orientação: +Y = Norte, +X = Este.
 Frames 1, 250, 400, 440, 480, 560, 660 e 960 (50 %, 24 amostras):
 
 ![Transição dia - crepúsculo - noite](preview/transicao_dia_noite.png)
+
+Plano de teste do butte com deslocamento real (materiais procedurais, sem as texturas):
+
+![Rochas com deslocamento](preview/rochas_deslocamento.png)
