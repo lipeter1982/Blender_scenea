@@ -17,6 +17,23 @@ plano e retocar no render.
 | 03 | [Gabinete do investigador](cenarios/03_gabinete_investigador/) | Base do canal (todos os vídeos) | v1 |
 | 04 | [Floresta enevoada e a clareira](cenarios/04_floresta_enevoada/) | Cenário genérico de horror (noite e dia) | v1 |
 | 05 | [Escola: corredor e sala de aula](cenarios/05_escola_corredor_sala/) | Sequência dos vultos (vazia → vultos → viraram-se) | v1 |
+| 06 | [Cemitério gótico e decadente](cenarios/06_cemiterio_gotico/) | Estilo Tim Burton (noite e dia) | v1 |
+
+## Guia de estilo (para os próximos cenários)
+
+**Referência principal: Tim Burton** (*A Noiva Cadáver*, *O Estranho Mundo de Jack*,
+*Sleepy Hollow*, *Beetlejuice*):
+
+- **Formas exageradas e alongadas**: tudo mais alto, mais estreito e mais torto do que o
+  real. Nada está perfeitamente direito.
+- **Espirais e curvas**: ramos enrolados, ferro forjado em volutas, colinas encaracoladas.
+- **Silhuetas negras recortadas** contra céus nublados e pálidos. O que se lê é a forma.
+- **Paleta fria e dessaturada**: azul-acinzentado e violeta nas sombras. O **único calor**
+  vem de fontes pequenas, como candeeiros, velas ou janelas.
+- **Luar pálido e fraco**, sem lua grande à vista: céu nublado com uma zona mais clara.
+- **Duas versões quando fizer sentido**: noite e dia, com o dia **igualmente inquietante**
+  (céu encoberto, luz chapada, nevoeiro).
+- **Um toque de humor macabro** nos detalhes: corvos pousados, relógios parados às 3:33, objetos fora de lugar.
 
 ## Estrutura
 
