@@ -168,11 +168,16 @@ def render_teste(args):
     scn.render.resolution_y = int(args.res * 9 / 16)
     scn.frame_step = args.step
     scn.render.fps = max(1, round(24 / args.step))
-    scn.render.image_settings.file_format = "FFMPEG"
-    scn.render.ffmpeg.format = "MPEG4"
-    scn.render.ffmpeg.codec = "H264"
-    scn.render.ffmpeg.constant_rate_factor = "HIGH"
-    scn.render.filepath = os.path.join(pasta, "plano_inferno_")
+    try:
+        scn.render.image_settings.file_format = "FFMPEG"
+        scn.render.ffmpeg.format = "MPEG4"
+        scn.render.ffmpeg.codec = "H264"
+        scn.render.ffmpeg.constant_rate_factor = "HIGH"
+        scn.render.filepath = os.path.join(pasta, "plano_inferno_")
+    except TypeError:   # o bpy do pip vem sem FFmpeg: frames soltos, para juntar depois num editor ou com o ffmpeg
+        scn.render.image_settings.file_format = "JPEG"
+        scn.render.image_settings.quality = 92
+        scn.render.filepath = os.path.join(pasta, "frame_")
     bpy.ops.render.render(animation=True)
 
 
