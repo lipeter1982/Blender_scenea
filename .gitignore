@@ -6,3 +6,6 @@ __pycache__/
 # renders e cache de texturas descarregadas (cenário 07, deserto)
 cenarios/*/render/
 cenarios/*/texturas/
+
+# renders da intro
+intro/render_intro/
