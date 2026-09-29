@@ -140,8 +140,8 @@ def plano_gabinete(mod, f0, f1):
         es.default_value = v
         es.keyframe_insert("default_value", frame=f)
     cam = camara("CAM_INTRO", 32)
-    ini = Vector((chair.x - 0.7, chair.y + 0.68, 1.55))        # por cima do ombro esquerdo
-    ctrl = Vector((chair.x - 0.75, chair.y - 0.3, 1.3))        # contorna a cabeça pela esquerda
+    ini = Vector((chair.x - 0.95, chair.y + 0.33, 1.5))        # por cima do ombro esquerdo, com o CRT ao lado da cabeça
+    ctrl = Vector((chair.x - 0.7, chair.y - 0.32, 1.25))       # contorna a cabeça pela esquerda
     fim = centro + normal * 0.012
     for f in range(f0, f1 + 1):
         u = (f - f0) / (f1 - f0)
