@@ -12,8 +12,14 @@ sincronizada ao frame com os planos de travessia.py:
   10,3–12 s meio segundo de silêncio e uma nota de celesta com reverberação longa no logo
 
 É uma maqueta: serve para acertar o ritmo; a faixa final deve ser composta ou licenciada.
+Estilo alternativo "trailer de ação" (--estilo trailer): tiquetaque e drone, BRAAAM de metais graves
+e impacto no mergulho, ostinato de cordas e taikos pelos mundos, um impacto em cada corte, um riser
+e um rufo de tarola a acelerar no Inferno, a maior pancada quando gela, silêncio total e a última
+pancada no logo.
+
 Uso:
     python musica_provisoria.py --out musica_provisoria.wav
+    python musica_provisoria.py --estilo trailer --out musica_trailer.wav --video animatic_travessia.mp4 --com-som animatic_trailer.mp4
     python musica_provisoria.py --out musica_provisoria.wav --video animatic_travessia.mp4 --com-som animatic_com_som.mp4
 """
 
@@ -256,6 +262,182 @@ def compor():
     return st.astype(np.float32)
 
 
+# ---------------------------------------------------------------------------
+# Estilo "trailer de ação"
+# ---------------------------------------------------------------------------
+def serra(freq, dur, detune=0.0):
+    t = np.arange(int(SR * dur)) / SR
+    f = freq * (1 + detune)
+    return (2 * ((f * t) % 1.0) - 1).astype(np.float32)
+
+
+def braaam(raiz="A1", dur=2.2, abre=0.25):
+    """Metais graves à Inception: serras desafinadas, distorção e um filtro que abre."""
+    n = int(SR * dur)
+    s = np.zeros(n, np.float32)
+    for nm in (raiz, raiz[:-1] + str(int(raiz[-1]) + 1)):
+        for d in (-0.012, -0.004, 0.0, 0.005, 0.011):
+            s += serra(nota(nm), dur, d)
+    s += 0.8 * serra(nota(raiz) * 1.5, dur, 0.003)            # a quinta
+    escuro, claro = filtro(s, hi=180), filtro(s, hi=2400)
+    t = np.arange(n) / SR
+    abertura = np.clip(t / abre, 0, 1) * np.exp(-t / 0.9)
+    s = escuro * (1 - abertura) + claro * abertura
+    s = np.tanh(s / (np.max(np.abs(s)) + 1e-9) * 3.0)
+    return (s * np.minimum(1, t / 0.03) * np.exp(-t / (dur * 0.45))).astype(np.float32)
+
+
+def impacto(dur=2.5, f0=70.0, f1=28.0):
+    """Pancada de trailer: sub-grave a descer + estalo de ruído."""
+    n = int(SR * dur)
+    t = np.arange(n) / SR
+    f = f1 + (f0 - f1) * np.exp(-t / 0.25)
+    sub = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.9)
+    estalo = filtro(ruido(n), hi=4000) * np.exp(-t / 0.05)
+    corpo = filtro(ruido(n), hi=400) * np.exp(-t / 0.3)
+    return np.tanh(1.6 * sub + 0.7 * estalo + 0.8 * corpo).astype(np.float32)
+
+
+def taiko(forca=1.0):
+    n = int(SR * 0.6)
+    t = np.arange(n) / SR
+    f = 55 + 60 * np.exp(-t / 0.03)
+    s = np.sin(2 * np.pi * np.cumsum(f) / SR) * np.exp(-t / 0.18)
+    s += 0.5 * filtro(ruido(n), hi=900) * np.exp(-t / 0.03)
+    return (np.tanh(s * 1.5) * forca).astype(np.float32)
+
+
+def tarola():
+    n = int(SR * 0.25)
+    t = np.arange(n) / SR
+    s = filtro(ruido(n), lo=1500) * np.exp(-t / 0.06) + 0.5 * np.sin(2 * np.pi * 190 * t) * np.exp(-t / 0.04)
+    return s.astype(np.float32)
+
+
+def riser(dur, f_ini=200.0, f_fim=2400.0):
+    """Tensão a subir: ruído que clareia e serras em glissando."""
+    n = int(SR * dur)
+    t = np.arange(n) / SR
+    u = t / dur
+    nz = ruido(n)
+    bandas = [filtro(nz, lo=lo, hi=lo * 2.2) for lo in (150, 500, 1500, 4000)]
+    peso = np.clip(u * len(bandas), 0, len(bandas) - 1e-6)
+    k = peso.astype(int)
+    fr = peso - k
+    b = np.stack(bandas)
+    ruido_sobe = b[k, np.arange(n)] * (1 - fr) + b[np.minimum(k + 1, len(bandas) - 1), np.arange(n)] * fr
+    f = f_ini * (f_fim / f_ini) ** (u ** 1.5)
+    gl = sum(2 * ((np.cumsum(f * (1 + d)) / SR) % 1.0) - 1 for d in (-0.01, 0.0, 0.01)) / 3
+    gl = filtro(gl.astype(np.float32), hi=3500)
+    return ((0.6 * ruido_sobe + 0.4 * gl) * u ** 2.2).astype(np.float32)
+
+
+def ostinato(t0, t1, dst, notas=("A2", "A2", "C3", "A2", "E3", "A2", "D3", "A2"), passo=0.125, ganho=0.18):
+    """Cordas graves em staccato, a semicolcheias (120 bpm)."""
+    k = 0
+    t = t0
+    while t < t1 - 0.01:
+        n = int(SR * passo * 0.9)
+        s = sum(serra(nota(notas[k % len(notas)]), passo * 0.9, d) for d in (-0.006, 0.0, 0.006))
+        s = filtro(s.astype(np.float32), hi=1400) * env(n, 0.003, 0.05)
+        acento = 1.35 if k % 4 == 0 else 1.0
+        por(dst, s, t, ganho * acento)
+        t += passo
+        k += 1
+
+
+def compor_trailer():
+    musica, perc, efeitos = pista(), pista(), pista()
+    tt = np.arange(N) / SR
+    m0 = t_(MERGULHO)
+    cortes = [t_(c) for c in CORTES]
+    g0, g1 = t_(GELO[0]), t_(GELO[1])
+    tl = t_(LOGO_NOTA)
+
+    # 0–2,5 s: tiquetaque (a acelerar), drone a crescer, CRT
+    t = 0.2
+    k = 0
+    while t < m0 - 0.3:
+        n = int(SR * 0.02)
+        tick = filtro(ruido(n), lo=3000 if k % 2 else 5000) * env(n, 0.0005, 0.004)
+        por(efeitos, tick, t, 0.5)
+        t += 0.5 if t < 1.2 else 0.25
+        k += 1
+    n = int(SR * m0)
+    drone = (np.sin(2 * np.pi * nota("A1") * tt[:n]) + 0.4 * serra(nota("A2"), m0, 0.004)[:n] * 0.2) * (tt[:n] / m0) ** 1.5
+    por(musica, drone.astype(np.float32), 0, 0.3)
+    hum = 0.5 * np.sin(2 * np.pi * 50 * tt) + 0.25 * np.sin(2 * np.pi * 100 * tt)
+    efeitos += (hum * np.clip((tt - t_(ECRA_LIGA)) * 8, 0, 1) * np.clip((m0 - tt) * 3, 0, 1) * 0.05).astype(np.float32)
+    por(perc, impacto(1.2, 90, 45), t_(ECRA_LIGA), 0.35)                  # o ecrã acende: um "tum"
+    por(efeitos, riser(1.3, 300, 3000), m0 - 1.3, 0.55)                   # a entrar no ecrã
+
+    # 2,5 s: BRAAAM + impacto — a caminhada começa
+    por(musica, braaam("A1", 2.0), m0, 0.9)
+    por(perc, impacto(), m0, 1.0)
+
+    # 2,5–6,5 s: ostinato, taikos no tempo, um impacto e um whoosh em cada corte
+    ostinato(m0 + 0.25, cortes[3], musica)
+    batida = 0.5
+    t = m0 + batida
+    k = 1
+    while t < cortes[3] - 0.01:
+        por(perc, taiko(1.0 if k % 2 == 0 else 0.6), t, 0.55)
+        if k % 2 == 1:
+            por(perc, tarola(), t + 0.25, 0.25)
+        t += batida
+        k += 1
+    for i, c in enumerate(cortes[:3]):
+        por(efeitos, riser(0.35, 800, 5000), c - 0.35, 0.35)
+        por(perc, impacto(1.2, 80 - 5 * i, 40), c, 0.6)
+        por(musica, braaam(("A1", "F1", "E1")[i], 0.9, 0.08), c, 0.35)
+
+    # 6,5–8,9 s: Inferno — a tensão sobe até ao gelo
+    ci = cortes[3]
+    por(musica, braaam("D1", 1.4), ci, 0.8)
+    por(perc, impacto(), ci, 0.9)
+    ostinato(ci + 0.25, g0, musica, notas=("D2", "D2", "F2", "D2", "A2", "D2", "G#2", "D2"), ganho=0.2)
+    por(efeitos, riser(g0 - ci, 150, 4000), ci, 0.75)
+    t = ci + 0.5
+    passo = 0.25
+    while t < g0 - 0.02:                                                  # rufo de tarola a acelerar
+        por(perc, tarola(), t, 0.18 + 0.25 * (t - ci) / (g0 - ci))
+        t += passo
+        passo = max(0.05, passo * 0.9)
+    por(perc, taiko(1.2), ci + 1.0, 0.7)
+    por(perc, taiko(1.2), ci + 1.5, 0.7)
+
+    # 8,9 s: o inferno gela — a maior pancada, depois só gelo a estalar e tensão fina
+    por(musica, braaam("A0", 2.6, 0.12), g0, 1.0)
+    por(perc, impacto(3.0, 60, 22), g0, 1.1)
+    n = int(SR * (g1 - g0 + 0.2))
+    fio = sum(np.sin(2 * np.pi * nota(nm) * np.arange(n) / SR) for nm in ("E6", "F6", "A6")) / 3
+    fio *= np.minimum(1, np.arange(n) / SR / 0.8)
+    por(musica, fio.astype(np.float32), g0 + 0.4, 0.06)
+    for _ in range(10):
+        n = int(SR * 0.08)
+        por(efeitos, filtro(ruido(n), lo=2500) * env(n, 0.0005, 0.012), g0 + 0.3 + rng.uniform(0, g1 - g0), rng.uniform(0.3, 0.6))
+
+    # 10,3–10,9 s: silêncio total … e a última pancada no logo
+    mix = musica + perc + efeitos
+    final = pista()
+    por(final, braaam("A1", 2.5, 0.05), tl, 0.9)
+    por(final, impacto(2.5, 75, 25), tl, 1.1)
+    por(final, taiko(1.3), tl, 0.6)
+    n = int(SR * 1.6)
+    brilho = sum(caixinha(nota(nm), 1.6) for nm in ("A5", "E6"))[:n]
+    por(final, brilho, tl, 0.2)                                         # um aceno à caixinha de música
+    # o corte para o silêncio vem depois da reverberação, para não ficar a cauda por baixo
+    corte = (tt > g1 + 0.02) & (tt < tl)
+    rampa = np.clip((tt - g1 - 0.02) / 0.12, 0, 1)
+    gate = np.where(corte, 1 - rampa, np.where(tt >= tl, 0.0, 1.0)).astype(np.float32)
+    st = np.stack([reverb(mix, 2.2, 0.25, 21) * gate + reverb(final, 2.4, 0.3, 23),
+                   reverb(mix, 2.2, 0.25, 22) * gate + reverb(final, 2.4, 0.3, 24)], 1)
+    st = np.tanh(st / (np.max(np.abs(st)) + 1e-9) * 1.8)                # limitador suave: mais volume
+    st = st * np.minimum(1, (DUR - tt) / 0.3)[:, None]
+    st = st / (np.max(np.abs(st)) + 1e-9) * 0.9
+    return st.astype(np.float32)
+
+
 def guardar_wav(path, st):
     pcm = (np.clip(st, -1, 1) * 32767).astype("<i2")
     with wave.open(path, "wb") as w:
@@ -278,8 +460,9 @@ def main():
     p.add_argument("--out", default="musica_provisoria.wav")
     p.add_argument("--video", default="")
     p.add_argument("--com-som", default="")
+    p.add_argument("--estilo", choices=("valsa", "trailer"), default="valsa")
     a = p.parse_args()
-    guardar_wav(a.out, compor())
+    guardar_wav(a.out, compor_trailer() if a.estilo == "trailer" else compor())
     print(f"> {a.out}")
     if a.video and a.com_som:
         subprocess.run([ffmpeg_exe(), "-y", "-loglevel", "error", "-i", a.video, "-i", a.out, "-c:v", "copy", "-c:a", "aac",
