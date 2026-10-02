@@ -21,6 +21,14 @@ plano e retocar no render.
 | 07 | [Deserto: canyons, dunas e planícies](cenarios/07_deserto_canyons/) | Paisagem: dia → crepúsculo → noite, 40 s (Blender 5.x, Cycles) | v1 |
 | 08 | [Inferno: fogo e gelo](cenarios/08_inferno_fogo_gelo/) | Estilo Tim Burton, inspirado em Dante (Brasas e Gelo, um só interruptor) | v1 |
 
+## Efeitos
+
+Efeitos reutilizáveis para aplicar aos avatares em qualquer cenário.
+
+| # | Efeito | Para quê | Estado |
+|---|---|---|---|
+| 01 | [Eletricidade SSJ](efeitos/01_eletricidade_ssj/) | Raios esporádicos a percorrer a pele do avatar (Dragon Ball Z), com intensidade de "quase nada" a "semi-permanente" | v1 |
+
 ## Guia de estilo (para os próximos cenários)
 
 **Referência principal: Tim Burton** (*A Noiva Cadáver*, *O Estranho Mundo de Jack*,
